@@ -276,7 +276,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
   <section id="menu" class="menu">
     <h1>Тест: Иностранные инвестиции</h1>
-    <p class="sub">281 вопрос · блоки по 25 · без пароля — открыт для всех</p>
+    <p class="sub">281 вопрос · блоки по 25</p>
 
     <div class="block-grid" id="blockGrid"></div>
 
@@ -414,6 +414,7 @@ function startBlock(n,shuffled){
 
 function begin(arr,mode,isRetry=false){
   list=arr;pos=0;answers={};
+  if(!isRetry) window._qMap = {};  // reshuffle options on new attempt
   session.mode=mode;session.isRetry=isRetry;
   if(!isRetry){
     session.originalList=[...arr];
@@ -443,13 +444,31 @@ function render(){
   const correct=list.filter(x=>answers[x.n]===x.answer).length;
   $('scoreLive').textContent=answered?`Верно: ${correct}/${answered}`:'Верно: —';
 
-  let opts=[...q.opts];
-  if(settings.shuffleOpts&&!a) opts=shuffle(opts);
+  // Fixed letters А-Г top-to-bottom; shuffle the *texts* so correct letter varies
+  const letters = ['А','Б','В','Г'];
+  let displayOpts;
+  if (!window._qMap) window._qMap = {};  // per-question shuffled mapping for this session
+  if (!window._qMap[q.n]) {
+    const texts = q.opts.map(o => o.text);
+    const correctText = q.opts.find(o => o.letter === q.answer).text;
+    const shuffled = settings.shuffleOpts ? shuffle(texts) : texts.slice();
+    // pad/truncate to available opts
+    while (shuffled.length < 4 && shuffled.length < q.opts.length) shuffled.push('');
+    const mapped = [];
+    let correctLetter = 'А';
+    for (let i = 0; i < Math.min(4, shuffled.length); i++) {
+      mapped.push({ letter: letters[i], text: shuffled[i] });
+      if (shuffled[i] === correctText) correctLetter = letters[i];
+    }
+    window._qMap[q.n] = { opts: mapped, answer: correctLetter };
+  }
+  displayOpts = window._qMap[q.n].opts;
+  const currentAnswer = window._qMap[q.n].answer;
 
-  $('opts').innerHTML=opts.map(o=>{
+  $('opts').innerHTML=displayOpts.map(o=>{
     let cls='opt';
     if(a){
-      if(o.letter===q.answer) cls+=' ok';
+      if(o.letter===currentAnswer) cls+=' ok';
       else if(o.letter===a) cls+=' bad';
     } else if(answers[q.n]===o.letter) cls+=' selected';
     return `<button class="${cls}" data-l="${o.letter}" ${a?'disabled':''}>
@@ -472,9 +491,10 @@ function render(){
 
   const fb=$('fb');
   if(a&&settings.instantFeedback){
-    const ok=a===q.answer;
+    const ok=a===currentAnswer;
+    const correctText = displayOpts.find(o=>o.letter===currentAnswer)?.text || '';
     fb.className='feedback '+(ok?'ok':'bad');
-    fb.innerHTML=`<b>${ok?'✓ Верно':'✗ Неверно'}</b> · Правильный ответ: <b>${q.answer}</b> — ${esc(q.opts.find(o=>o.letter===q.answer).text)}`;
+    fb.innerHTML=`<b>${ok?'✓ Верно':'✗ Неверно'}</b> · Правильный ответ: <b>${currentAnswer}</b> — ${esc(correctText)}`;
     fb.classList.remove('hidden');
   } else {
     fb.classList.add('hidden');fb.innerHTML='';
@@ -505,11 +525,19 @@ $('flagBtn').onclick=()=>{
   updateStats();
 };
 
+function getMappedAnswer(q){
+  if(window._qMap && window._qMap[q.n]) return window._qMap[q.n].answer;
+  return q.answer;
+}
+function getMappedOpts(q){
+  if(window._qMap && window._qMap[q.n]) return window._qMap[q.n].opts;
+  return q.opts;
+}
 function finish(){
-  const ok=list.filter(q=>answers[q.n]===q.answer).length;
+  const ok=list.filter(q=>answers[q.n]===getMappedAnswer(q)).length;
   const total=list.length;
   const pct=Math.round(ok/total*100);
-  const wrongs=list.filter(q=>answers[q.n]!==q.answer);
+  const wrongs=list.filter(q=>answers[q.n]!==getMappedAnswer(q));
 
   if(session.round===1){
     session.firstTryCorrect=ok;
@@ -574,11 +602,12 @@ function finish(){
     errBox.innerHTML='<h3 style="margin:0 0 12px;font-size:1rem">Ошибки</h3>';
     wrongs.forEach(q=>{
       const user=answers[q.n]||'пропуск';
-      const correctText=q.opts.find(o=>o.letter===q.answer).text;
+      const ans=getMappedAnswer(q);
+      const correctText=(getMappedOpts(q).find(o=>o.letter===ans)||{}).text || '';
       const div=document.createElement('div');
       div.className='err-item';
       div.innerHTML=`<b>№${q.n}. ${esc(q.q)}</b>
-        <div class="ans">Ваш ответ: ${user} · <span class="correct">Правильный: ${q.answer} — ${esc(correctText)}</span></div>`;
+        <div class="ans">Ваш ответ: ${user} · <span class="correct">Правильный: ${ans} — ${esc(correctText)}</span></div>`;
       errBox.appendChild(div);
     });
   }
